@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SafetyHub — Campus Emergency Monitor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+  <style>
+    /* ── Reset & Variables ─────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #080C0E;
+      --surface:  #0D1517;
+      --surface2: #111920;
+      --border:   rgba(0,255,200,0.08);
+      --border-hi:rgba(0,255,200,0.22);
+      --cyan:     #00FFC8;
+      --cyan-dim: rgba(0,255,200,0.12);
+      --danger:   #FF3B3B;
+      --warn:     #FFB800;
+      --green:    #34d399;
+      --blue:     #00B4FF;
+      --purple:   #A78BFA;
+      --orange:   #FF6B35;
+      --text:     #E8F0EE;
+      --muted:    #5A7068;
+      --radius:   16px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Grotesk', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
+
+    /* ── Layout ────────────────────────────────────────────── */
+    .page-wrap { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    /* ── Glass card ────────────────────────────────────────── */
+    .glass {
+      background: rgba(13,21,23,0.85);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    /* ── Grid bg ────────────────────────────────────────────── */
+    .grid-bg {
+      background-image:
+        linear-gradient(rgba(0,255,200,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,255,200,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    /* ── Ambient glow ──────────────────────────────────────── */
+    .ambient {
+      position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 0;
+    }
+    .ambient-top {
+      position: absolute; top: -100px; left: 50%; transform: translateX(-50%);
+      width: 600px; height: 300px; border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(0,255,200,0.06), transparent 70%);
+      filter: blur(60px);
+    }
+    .ambient-right {
+      position: absolute; bottom: 0; right: -100px;
+      width: 400px; height: 400px; border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(167,139,250,0.04), transparent 70%);
+      filter: blur(60px);
+    }
+
+    /* ── Header ────────────────────────────────────────────── */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 0 28px; position: relative; z-index: 1;
+    }
+    .header-left .eyebrow {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 4px;
+    }
+    .header-left h1 {
+      font-size: 28px; font-weight: 700; letter-spacing: -0.5px; color: #fff;
+    }
+    .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 999px;
+      background: rgba(13,21,23,0.9); border: 1px solid var(--border);
+      font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted);
+    }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--muted); flex-shrink: 0;
+    }
+    .dot.online  { background: var(--green);  box-shadow: 0 0 6px var(--green); }
+    .dot.offline { background: var(--danger); }
+    .dot.pulse   { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+    /* ── Alert banner ──────────────────────────────────────── */
+    #alert-banner {
+      display: none;
+      align-items: center; gap: 12px;
+      padding: 12px 16px; border-radius: 12px; margin-bottom: 20px;
+      background: rgba(255,59,59,0.1); border: 1px solid rgba(255,59,59,0.35);
+      box-shadow: 0 0 30px rgba(255,59,59,0.15);
+      animation: alertPulse 2s ease-in-out infinite;
+      position: relative; z-index: 1;
+    }
+    #alert-banner.visible { display: flex; }
+    @keyframes alertPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.75; } }
+    .alert-icon {
+      width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255,59,59,0.18); font-size: 16px;
+    }
+    .alert-label { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      letter-spacing: 0.2em; text-transform: uppercase; color: #FF3B3B; font-weight: 600; }
+    #alert-message { font-size: 14px; color: #fca5a5; margin-top: 2px; }
+
+    /* ── Sensor cards grid ─────────────────────────────────── */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 16px; margin-bottom: 20px;
+      position: relative; z-index: 1;
+    }
+
+    .sensor-card {
+      padding: 20px; position: relative; overflow: hidden;
+      transition: box-shadow 0.3s, border-color 0.3s;
+    }
+    .sensor-card.safe    { box-shadow: 0 0 20px rgba(0,255,200,0.06); }
+    .sensor-card.warning { border-color: rgba(255,184,0,0.3)!important;
+                           box-shadow: 0 0 20px rgba(255,184,0,0.1); }
+    .sensor-card.danger  { border-color: rgba(255,59,59,0.35)!important;
+                           box-shadow: 0 0 24px rgba(255,59,59,0.15); }
+
+    .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .card-label-wrap { display: flex; align-items: center; gap: 8px; }
+    .card-icon {
+      width: 28px; height: 28px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center; font-size: 13px;
+    }
+    .card-label {
+      font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted);
+    }
+
+    .status-badge {
+      font-family: 'JetBrains Mono', monospace; font-size: 9px;
+      font-weight: 600; letter-spacing: 0.15em; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 4px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .badge-safe    { background: rgba(52,211,153,0.12); color: var(--green);  border: 1px solid rgba(52,211,153,0.25); }
+    .badge-warning { background: rgba(251,191,36,0.12); color: var(--warn);   border: 1px solid rgba(251,191,36,0.25); }
+    .badge-danger  { background: rgba(255,59,59,0.12);  color: var(--danger); border: 1px solid rgba(255,59,59,0.25); }
+
+    .card-value {
+      font-size: 48px; font-weight: 700; line-height: 1; margin-bottom: 4px;
+      transition: color 0.3s;
+    }
+    .card-unit  { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--muted); margin-left: 4px; }
+    .card-sub   { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+    /* Glow line at bottom */
+    .card-glow-line {
+      position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+      border-radius: 0 0 var(--radius) var(--radius); opacity: 0.4;
+    }
+
+    /* ── Seismic hero ──────────────────────────────────────── */
+    .seismic-hero {
+      padding: 24px; margin-bottom: 20px; position: relative;
+      overflow: hidden; z-index: 1;
+    }
+    .seismic-hero .grid-bg {
+      position: absolute; inset: 0; border-radius: var(--radius); opacity: 0.3;
+    }
+    .seismic-hero-inner { position: relative; }
+    .seismic-hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .seismic-hero-label { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      letter-spacing: 0.25em; text-transform: uppercase; color: var(--muted); }
+    .live-badge {
+      display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 8px;
+      background: rgba(13,21,23,0.8); border: 1px solid var(--border-hi);
+      font-family: 'JetBrains Mono', monospace; font-size: 9px;
+      letter-spacing: 0.15em; color: var(--cyan);
+    }
+    .live-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--cyan); box-shadow: 0 0 6px var(--cyan);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    .seismic-value { font-size: 72px; font-weight: 700; color: var(--cyan); line-height: 1; }
+    .seismic-unit  { font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: var(--muted); margin-top: 4px; }
+    .seismic-status-badge {
+      display: inline-flex; align-items: center;
+      padding: 5px 12px; border-radius: 999px; margin-top: 12px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600;
+    }
+
+    /* ── Stats row ──────────────────────────────────────────── */
+    .stats-row {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 20px; position: relative; z-index: 1;
+    }
+    .stat-card { padding: 16px; }
+    .stat-label { font-family: 'JetBrains Mono', monospace; font-size: 9px;
+      letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+    .stat-value { font-size: 22px; font-weight: 700; }
+
+    /* ── Charts ─────────────────────────────────────────────── */
+    .charts-section { position: relative; z-index: 1; }
+    .charts-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .section-title { font-size: 16px; font-weight: 600; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px; margin-bottom: 20px;
+    }
+    .chart-card { padding: 16px; }
+    .chart-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+    }
+    .chart-label { font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      letter-spacing: 0.15em; text-transform: uppercase; color: var(--muted); }
+    .chart-current { font-size: 14px; font-weight: 600; }
+    .chart-wrap { height: 100px; position: relative; }
+
+    /* ── Alert history ──────────────────────────────────────── */
+    .alerts-section { position: relative; z-index: 1; margin-top: 8px; }
+    .alert-list { display: flex; flex-direction: column; gap: 8px; }
+    .alert-item {
+      display: flex; align-items: flex-start; gap: 12px; padding: 14px;
+      border-radius: 12px; transition: all 0.3s;
+    }
+    .alert-item.hazard {
+      background: rgba(255,59,59,0.06); border: 1px solid rgba(255,59,59,0.2);
+    }
+    .alert-item.normal {
+      background: rgba(52,211,153,0.04); border: 1px solid rgba(52,211,153,0.12);
+    }
+    .alert-item-icon {
+      width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 14px;
+    }
+    .alert-item-title { font-size: 13px; font-weight: 600; margin-bottom: 3px; }
+    .alert-item-meta {
+      font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted);
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .no-alerts { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 13px; }
+
+    /* ── Last updated ───────────────────────────────────────── */
+    .footer-bar {
+      display: flex; align-items: center; justify-content: center;
+      gap: 12px; padding: 16px 0; position: relative; z-index: 1;
+      font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted);
+    }
+    .footer-line { flex: 1; height: 1px; background: var(--border); }
+
+    /* ── Shimmer skeleton ───────────────────────────────────── */
+    .shimmer {
+      background: linear-gradient(90deg, var(--surface) 25%, var(--surface2) 50%, var(--surface) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.5s infinite; border-radius: 6px; height: 48px; width: 100px;
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* ── Responsive ─────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .seismic-value { font-size: 52px; }
+      .header { flex-direction: column; align-items: flex-start; gap: 12px; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="ambient">
+  <div class="ambient-top"></div>
+  <div class="ambient-right"></div>
+</div>
+
+<div class="page-wrap">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="eyebrow">Safety Hub · KGiSL</div>
+      <h1>Campus Emergency Monitor</h1>
+    </div>
+    <div class="header-right">
+      <div class="status-pill" id="esp32-status">
+        <div class="dot" id="esp32-dot"></div>
+        <span id="esp32-label">Connecting…</span>
+      </div>
+      <div class="status-pill" id="cloud-status">
+        <div class="dot online pulse"></div>
+        <span>Cloud API</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Alert banner -->
+  <div id="alert-banner">
+    <div class="alert-icon">⚠</div>
+    <div>
+      <div class="alert-label">Critical Alert</div>
+      <div id="alert-message"></div>
+    </div>
+  </div>
+
+  <!-- Seismic hero card -->
+  <div class="glass seismic-hero" id="seismic-hero">
+    <div class="grid-bg"></div>
+    <div class="seismic-hero-inner">
+      <div class="seismic-hero-top">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:14px;">📳</span>
+          <span class="seismic-hero-label">Seismic Activity</span>
+        </div>
+        <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+      </div>
+      <div style="display:flex;align-items:flex-end;gap:24px;">
+        <div>
+          <div class="seismic-value" id="seismic-value">—</div>
+          <div class="seismic-unit">MAGNITUDE (G-FORCE)</div>
+        </div>
+        <div style="margin-left:auto;text-align:right;padding-bottom:8px;">
+          <div style="font-size:24px;font-weight:600;color:var(--muted);">5.0 km</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);">DEPTH EST.</div>
+        </div>
+      </div>
+      <div class="seismic-status-badge" id="seismic-badge"
+        style="background:rgba(52,211,153,0.15);border:1px solid rgba(52,211,153,0.3);color:var(--green);">
+        Stable
+      </div>
+    </div>
+  </div>
+
+  <!-- Sensor cards -->
+  <div class="cards-grid">
+
+    <div class="glass sensor-card safe" id="card-temp">
+      <div class="card-header">
+        <div class="card-label-wrap">
+          <div class="card-icon" style="background:rgba(255,107,53,0.15);">🌡</div>
+          <span class="card-label">Temperature</span>
+        </div>
+        <div class="status-badge badge-safe" id="badge-temp">
+          <div class="dot online" style="width:5px;height:5px;"></div>SAFE
+        </div>
+      </div>
+      <div class="card-value" id="val-temp" style="color:#FF6B35;"><div class="shimmer"></div></div>
+      <div class="card-sub" id="sub-temp">—</div>
+      <div class="card-glow-line" style="background:linear-gradient(90deg,transparent,#FF6B35,transparent);"></div>
+    </div>
+
+    <div class="glass sensor-card safe" id="card-humidity">
+      <div class="card-header">
+        <div class="card-label-wrap">
+          <div class="card-icon" style="background:rgba(0,180,255,0.15);">💧</div>
+          <span class="card-label">Humidity</span>
+        </div>
+        <div class="status-badge badge-safe" id="badge-humidity">
+          <div class="dot online" style="width:5px;height:5px;"></div>SAFE
+        </div>
+      </div>
+      <div class="card-value" id="val-humidity" style="color:#00B4FF;"><div class="shimmer"></div></div>
+      <div class="card-sub" id="sub-humidity">—</div>
+      <div class="card-glow-line" style="background:linear-gradient(90deg,transparent,#00B4FF,transparent);"></div>
+    </div>
+
+    <div class="glass sensor-card safe" id="card-gas">
+      <div class="card-header">
+        <div class="card-label-wrap">
+          <div class="card-icon" style="background:rgba(0,255,200,0.15);">💨</div>
+          <span class="card-label">Gas Level</span>
+        </div>
+        <div class="status-badge badge-safe" id="badge-gas">
+          <div class="dot online" style="width:5px;height:5px;"></div>SAFE
+        </div>
+      </div>
+      <div class="card-value" id="val-gas" style="color:#00FFC8;"><div class="shimmer"></div></div>
+      <div class="card-sub" id="sub-gas">—</div>
+      <div class="card-glow-line" style="background:linear-gradient(90deg,transparent,#00FFC8,transparent);"></div>
+    </div>
+
+    <div class="glass sensor-card safe" id="card-alert-status">
+      <div class="card-header">
+        <div class="card-label-wrap">
+          <div class="card-icon" style="background:rgba(167,139,250,0.15);">🛡</div>
+          <span class="card-label">System Status</span>
+        </div>
+        <div class="status-badge badge-safe" id="badge-system">
+          <div class="dot online" style="width:5px;height:5px;"></div>OK
+        </div>
+      </div>
+      <div style="font-size:20px;font-weight:600;color:#A78BFA;margin:10px 0 4px;" id="val-alert">System Normal</div>
+      <div class="card-sub" id="sub-alert">All sensors within safe range</div>
+      <div class="card-glow-line" style="background:linear-gradient(90deg,transparent,#A78BFA,transparent);"></div>
+    </div>
+
+  </div>
+
+  <!-- Stats row -->
+  <div class="stats-row">
+    <div class="glass stat-card">
+      <div class="stat-label">Total Readings</div>
+      <div class="stat-value" id="stat-total" style="color:var(--cyan);">—</div>
+    </div>
+    <div class="glass stat-card">
+      <div class="stat-label">Alert Events</div>
+      <div class="stat-value" id="stat-alerts" style="color:var(--danger);">—</div>
+    </div>
+    <div class="glass stat-card">
+      <div class="stat-label">Max Temp</div>
+      <div class="stat-value" id="stat-maxtemp" style="color:var(--orange);">—</div>
+    </div>
+    <div class="glass stat-card">
+      <div class="stat-label">Max Gas</div>
+      <div class="stat-value" id="stat-maxgas" style="color:var(--cyan);">—</div>
+    </div>
+    <div class="glass stat-card">
+      <div class="stat-label">Max Seismic</div>
+      <div class="stat-value" id="stat-maxvib" style="color:var(--purple);">—</div>
+    </div>
+    <div class="glass stat-card">
+      <div class="stat-label">Live Viewers</div>
+      <div class="stat-value" id="stat-clients" style="color:var(--green);">—</div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-section">
+    <div class="charts-header">
+      <div class="section-title">Live Charts</div>
+      <div class="status-pill">
+        <div class="live-dot"></div>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--cyan);">REALTIME</span>
+      </div>
+    </div>
+    <div class="charts-grid">
+      <div class="glass chart-card">
+        <div class="chart-header">
+          <span class="chart-label">Temperature</span>
+          <span class="chart-current" id="chart-cur-temp" style="color:#FF6B35;">—</span>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-temp"></canvas></div>
+      </div>
+      <div class="glass chart-card">
+        <div class="chart-header">
+          <span class="chart-label">Humidity</span>
+          <span class="chart-current" id="chart-cur-hum" style="color:#00B4FF;">—</span>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-humidity"></canvas></div>
+      </div>
+      <div class="glass chart-card">
+        <div class="chart-header">
+          <span class="chart-label">Gas Level</span>
+          <span class="chart-current" id="chart-cur-gas" style="color:#00FFC8;">—</span>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-gas"></canvas></div>
+      </div>
+      <div class="glass chart-card">
+        <div class="chart-header">
+          <span class="chart-label">Seismic (G)</span>
+          <span class="chart-current" id="chart-cur-vib" style="color:#A78BFA;">—</span>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-vib"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert history -->
+  <div class="alerts-section">
+    <div class="charts-header">
+      <div class="section-title">Alert History</div>
+      <div class="status-pill"><span id="alert-count-badge">0 events</span></div>
+    </div>
+    <div class="alert-list" id="alert-list">
+      <div class="no-alerts">No alert events yet — monitoring active</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer-bar">
+    <div class="footer-line"></div>
+    <span id="last-updated">Connecting to backend…</span>
+    <div class="footer-line"></div>
+  </div>
+
+</div><!-- /page-wrap -->
+
+<script>
+// ════════════════════════════════════════════════════════════
+//  CONFIG — Change BACKEND_URL to your deployed Render URL
+// ════════════════════════════════════════════════════════════
+const BACKEND_URL = window.SAFETYHUB_BACKEND || 'https://YOUR-APP.onrender.com'
+const MAX_CHART_POINTS = 30
+const MAX_ALERT_EVENTS = 50
+
+// ── Thresholds ───────────────────────────────────────────────
+const THRESHOLDS = {
+  temperature: { warn: 35,  danger: 45 },
+  humidity:    { warn: 75,  danger: 90 },
+  gasLevel:    { warn: 500, danger: 800 },
+  vibration:   { warn: 1.0, danger: 2.5 },
+}
+
+// ── State ────────────────────────────────────────────────────
+let alertEvents  = []
+let lastAlert    = null
+let statsTimer   = null
+
+// ── Chart setup ──────────────────────────────────────────────
+Chart.defaults.color = '#5A7068'
+Chart.defaults.font.family = "'JetBrains Mono', monospace"
+Chart.defaults.font.size   = 9
+
+function makeChart(id, color, warnY, dangerY) {
+  const ctx = document.getElementById(id).getContext('2d')
+  return new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels:   [],
+      datasets: [{
+        data:              [],
+        borderColor:       color,
+        borderWidth:       1.5,
+        pointRadius:       0,
+        pointHoverRadius:  3,
+        tension:           0.4,
+        fill:              true,
+        backgroundColor:   hexToRgba(color, 0.08),
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: ctx => ` ${ctx.parsed.y}` },
+          backgroundColor: 'rgba(13,21,23,0.9)',
+          borderColor: color + '60', borderWidth: 1,
+        },
+        annotation: { annotations: {} }   // we draw threshold lines manually
+      },
+      scales: {
+        x: { display: false },
+        y: {
+          grid: { color: 'rgba(0,255,200,0.05)', drawBorder: false },
+          ticks: { maxTicksLimit: 4 },
+          border: { display: false }
+        }
+      }
+    }
+  })
+}
+
+const charts = {
+  temp:     makeChart('chart-temp',     '#FF6B35', 35,  45),
+  humidity: makeChart('chart-humidity', '#00B4FF', 75,  90),
+  gas:      makeChart('chart-gas',      '#00FFC8', 500, 800),
+  vib:      makeChart('chart-vib',      '#A78BFA', 1.0, 2.5),
+}
+
+function hexToRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16)
+  const g = parseInt(hex.slice(3,5),16)
+  const b = parseInt(hex.slice(5,7),16)
+  return `rgba(${r},${g},${b},${a})`
+}
+
+function pushChart(chart, label, value, max) {
+  chart.data.labels.push(label)
+  chart.data.datasets[0].data.push(value)
+  if (chart.data.labels.length > max) {
+    chart.data.labels.shift()
+    chart.data.datasets[0].data.shift()
+  }
+  chart.update('none')
+}
+
+// ── Status helpers ────────────────────────────────────────────
+function getStatus(key, val) {
+  const t = THRESHOLDS[key]
+  if (!t || val === null || val === undefined) return 'safe'
+  if (val >= t.danger) return 'danger'
+  if (val >= t.warn)   return 'warning'
+  return 'safe'
+}
+
+function getSublabel(key, val) {
+  const labels = {
+    temperature: ['Comfortable','Warm','Critical Heat'],
+    humidity:    ['Normal','High','Saturated'],
+    gasLevel:    ['Good Air','Moderate','Hazardous'],
+    vibration:   ['Stable','Minor Activity','Earthquake!'],
+  }
+  const t = THRESHOLDS[key]
+  const lb = labels[key]
+  if (!lb || val === null) return '—'
+  if (val >= t.danger) return lb[2]
+  if (val >= t.warn)   return lb[1]
+  return lb[0]
+}
+
+// ── DOM update ────────────────────────────────────────────────
+function applyCard(cardId, valId, subId, badgeId, val, unit, key, displayVal) {
+  const s  = getStatus(key, val)
+  const card  = document.getElementById(cardId)
+  const badge = document.getElementById(badgeId)
+  const sub   = document.getElementById(subId)
+  const valEl = document.getElementById(valId)
+
+  card.className = `glass sensor-card ${s}`
+  badge.className = `status-badge badge-${s}`
+
+  const dotColor = s === 'danger' ? 'var(--danger)' : s === 'warning' ? 'var(--warn)' : 'var(--green)'
+  badge.innerHTML = `<div class="dot" style="width:5px;height:5px;background:${dotColor};box-shadow:0 0 4px ${dotColor};"></div>${s.toUpperCase()}`
+
+  valEl.innerHTML = `${displayVal ?? val}<span class="card-unit">${unit}</span>`
+  if (sub) sub.textContent = getSublabel(key, val)
+}
+
+function updateDashboard(d) {
+  const ts = new Date(d.timestamp)
+  const timeStr = ts.toLocaleTimeString('en-US', { hour12: false })
+
+  // Seismic hero
+  const vib = parseFloat(d.vibration)
+  document.getElementById('seismic-value').textContent = vib.toFixed(2)
+  const sVibStatus = getStatus('vibration', vib)
+  const badge = document.getElementById('seismic-badge')
+  if (sVibStatus === 'danger') {
+    badge.style.cssText = 'background:rgba(255,59,59,0.15);border:1px solid rgba(255,59,59,0.35);color:var(--danger);'
+    badge.textContent = 'Earthquake Detected!'
+  } else if (sVibStatus === 'warning') {
+    badge.style.cssText = 'background:rgba(255,184,0,0.12);border:1px solid rgba(255,184,0,0.3);color:var(--warn);'
+    badge.textContent = 'Minor Activity'
+  } else {
+    badge.style.cssText = 'background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.25);color:var(--green);'
+    badge.textContent = 'Stable'
+  }
+
+  // Sensor cards
+  applyCard('card-temp',     'val-temp',     'sub-temp',     'badge-temp',     d.temperature, '°C',  'temperature', parseFloat(d.temperature).toFixed(1))
+  applyCard('card-humidity', 'val-humidity', 'sub-humidity', 'badge-humidity', d.humidity,    '%',   'humidity',    parseFloat(d.humidity).toFixed(1))
+  applyCard('card-gas',      'val-gas',      'sub-gas',      'badge-gas',      d.gasLevel,    ' ppm','gasLevel',    d.gasLevel)
+
+  // System status card
+  const isAlert = d.alert && d.alert !== 'System Normal'
+  const sCard = document.getElementById('card-alert-status')
+  const sBadge = document.getElementById('badge-system')
+  sCard.className = `glass sensor-card ${isAlert ? 'danger' : 'safe'}`
+  sBadge.className = `status-badge ${isAlert ? 'badge-danger' : 'badge-safe'}`
+  sBadge.innerHTML = isAlert ? '⚠ ALERT' : '✓ OK'
+  document.getElementById('val-alert').textContent = d.alert
+  document.getElementById('sub-alert').textContent = isAlert ? 'Hazard detected — check surroundings' : 'All sensors within safe range'
+
+  // Alert banner
+  const banner = document.getElementById('alert-banner')
+  if (isAlert) {
+    banner.classList.add('visible')
+    document.getElementById('alert-message').textContent = d.alert
+  } else {
+    banner.classList.remove('visible')
+  }
+
+  // Alert log
+  if (d.alert !== lastAlert) {
+    lastAlert = d.alert
+    addAlertEvent(d, ts)
+  }
+
+  // ESP32 status indicator
+  document.getElementById('esp32-dot').className = 'dot online'
+  document.getElementById('esp32-label').textContent = 'ESP32 Live'
+
+  // Charts
+  pushChart(charts.temp,     timeStr, parseFloat(d.temperature).toFixed(1), MAX_CHART_POINTS)
+  pushChart(charts.humidity, timeStr, parseFloat(d.humidity).toFixed(1),    MAX_CHART_POINTS)
+  pushChart(charts.gas,      timeStr, d.gasLevel,                           MAX_CHART_POINTS)
+  pushChart(charts.vib,      timeStr, parseFloat(d.vibration).toFixed(3),   MAX_CHART_POINTS)
+
+  // Chart current labels
+  document.getElementById('chart-cur-temp').textContent = `${parseFloat(d.temperature).toFixed(1)}°C`
+  document.getElementById('chart-cur-hum').textContent  = `${parseFloat(d.humidity).toFixed(1)}%`
+  document.getElementById('chart-cur-gas').textContent  = `${d.gasLevel} ppm`
+  document.getElementById('chart-cur-vib').textContent  = `${parseFloat(d.vibration).toFixed(3)} G`
+
+  // Last updated
+  document.getElementById('last-updated').textContent = `Updated ${timeStr}`
+}
+
+// ── Alert event log ──────────────────────────────────────────
+function addAlertEvent(d, ts) {
+  const isHazard = d.alert !== 'System Normal'
+  alertEvents.unshift({ ...d, _ts: ts, _isHazard: isHazard })
+  if (alertEvents.length > MAX_ALERT_EVENTS) alertEvents.pop()
+
+  document.getElementById('alert-count-badge').textContent = `${alertEvents.filter(e => e._isHazard).length} events`
+  renderAlertList()
+}
+
+function renderAlertList() {
+  const list = document.getElementById('alert-list')
+  if (alertEvents.length === 0) {
+    list.innerHTML = '<div class="no-alerts">No alert events yet — monitoring active</div>'
+    return
+  }
+  list.innerHTML = alertEvents.map(e => {
+    const icon = e._isHazard
+      ? (e.alert.toLowerCase().includes('gas') ? '💨' : e.alert.toLowerCase().includes('earthquake') ? '📳' : '🔥')
+      : '✅'
+    const cls = e._isHazard ? 'hazard' : 'normal'
+    const titleColor = e._isHazard ? 'var(--danger)' : 'var(--green)'
+    const iconBg = e._isHazard ? 'rgba(255,59,59,0.15)' : 'rgba(52,211,153,0.1)'
+    const timeStr = e._ts.toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:false })
+    return `
+      <div class="alert-item ${cls}">
+        <div class="alert-item-icon" style="background:${iconBg}">${icon}</div>
+        <div style="flex:1;min-width:0">
+          <div class="alert-item-title" style="color:${titleColor}">${e.alert}</div>
+          <div class="alert-item-meta">
+            <span>${timeStr}</span>
+            ${e.temperature !== undefined ? `<span>🌡 ${parseFloat(e.temperature).toFixed(1)}°C</span>` : ''}
+            ${e.gasLevel    !== undefined ? `<span>💨 ${e.gasLevel} ppm</span>` : ''}
+            ${e.vibration   !== undefined ? `<span>📳 ${parseFloat(e.vibration).toFixed(3)} G</span>` : ''}
+          </div>
+        </div>
+      </div>`
+  }).join('')
+}
+
+// ── Load stats from REST API ──────────────────────────────────
+async function loadStats() {
+  try {
+    const [statsRes, healthRes] = await Promise.all([
+      fetch(`${BACKEND_URL}/stats`),
+      fetch(`${BACKEND_URL}/health`),
+    ])
+    if (statsRes.ok) {
+      const s = await statsRes.json()
+      document.getElementById('stat-total').textContent   = s.total_readings?.toLocaleString() ?? '—'
+      document.getElementById('stat-alerts').textContent  = s.alert_count ?? '—'
+      document.getElementById('stat-maxtemp').textContent = s.max_temperature ? `${s.max_temperature}°` : '—'
+      document.getElementById('stat-maxgas').textContent  = s.max_gas_level ? `${s.max_gas_level}` : '—'
+      document.getElementById('stat-maxvib').textContent  = s.max_vibration ? `${s.max_vibration}G` : '—'
+    }
+    if (healthRes.ok) {
+      const h = await healthRes.json()
+      document.getElementById('stat-clients').textContent = h.sse_clients ?? '—'
+    }
+  } catch (e) { /* silent */ }
+}
+
+// ── Load recent history on page load ─────────────────────────
+async function loadHistory() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/history?limit=30`)
+    if (!res.ok) return
+    const json = await res.json()
+    const readings = (json.readings || []).reverse()   // oldest first for charts
+    readings.forEach(d => {
+      const ts = new Date(d.timestamp)
+      const t  = ts.toLocaleTimeString('en-US', { hour12: false })
+      pushChart(charts.temp,     t, parseFloat(d.temperature).toFixed(1), MAX_CHART_POINTS)
+      pushChart(charts.humidity, t, parseFloat(d.humidity).toFixed(1),    MAX_CHART_POINTS)
+      pushChart(charts.gas,      t, d.gasLevel,                           MAX_CHART_POINTS)
+      pushChart(charts.vib,      t, parseFloat(d.vibration).toFixed(3),   MAX_CHART_POINTS)
+    })
+    // Show latest reading immediately
+    if (readings.length > 0) updateDashboard(readings[readings.length - 1])
+  } catch (e) { console.warn('History load failed:', e) }
+}
+
+// ── Load alert events from API ────────────────────────────────
+async function loadAlerts() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/alerts?limit=20`)
+    if (!res.ok) return
+    const json = await res.json()
+    ;(json.alerts || []).forEach(a => {
+      alertEvents.push({ ...a, _ts: new Date(a.timestamp), _isHazard: true })
+    })
+    if (alertEvents.length > 0) {
+      document.getElementById('alert-count-badge').textContent =
+        `${alertEvents.filter(e => e._isHazard).length} events`
+      renderAlertList()
+    }
+  } catch (e) { /* silent */ }
+}
+
+// ── SSE connection ────────────────────────────────────────────
+function connectSSE() {
+  const evtSource = new EventSource(`${BACKEND_URL}/stream`)
+
+  evtSource.onopen = () => {
+    console.log('[SSE] Connected to backend stream')
+    document.getElementById('last-updated').textContent = 'Stream connected — waiting for data…'
+  }
+
+  evtSource.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      updateDashboard(data)
+    } catch (e) {
+      console.warn('[SSE] Parse error:', e)
+    }
+  }
+
+  evtSource.onerror = () => {
+    console.warn('[SSE] Connection lost — reconnecting in 3s…')
+    document.getElementById('esp32-dot').className   = 'dot offline'
+    document.getElementById('esp32-label').textContent = 'Reconnecting…'
+    document.getElementById('last-updated').textContent = 'Stream disconnected — reconnecting…'
+    evtSource.close()
+    setTimeout(connectSSE, 3000)
+  }
+}
+
+// ── Bootstrap ─────────────────────────────────────────────────
+;(async () => {
+  await loadHistory()
+  await loadAlerts()
+  await loadStats()
+  connectSSE()
+
+  // Refresh stats every 30 s
+  statsTimer = setInterval(loadStats, 30_000)
+})()
+</script>
+
+</body>
+</html>

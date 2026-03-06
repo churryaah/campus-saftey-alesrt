@@ -1,0 +1,23 @@
+# render.yaml  —  Render.com deployment configuration
+# Deploy everything with one click by connecting this repo to Render.
+# https://dashboard.render.com/select-repo
+
+services:
+  # ── FastAPI Backend ─────────────────────────────────────────
+  - type: web
+    name: safetyhub-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free          # upgrade to starter ($7/mo) for always-on
+    region: oregon      # or frankfurt, singapore
+    envVars:
+      - key: DATABASE_URL
+        sync: false   # We will provide this manually during setup
+      - key: GATEWAY_API_KEY
+        generateValue: true
+      - key: PORT
+        value: "8000"
+    healthCheckPath: /health
+    autoDeploy: true
+
